@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/Users/alexh/Documents/Repos/phone32/phone32/build/CMakeFiles/bootloader
+/Users/alexh/Documents/Repos/phone32/phone32/build/CMakeFiles/bootloader.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/CMakeFiles/bootloader-complete.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/Users/alexh/Documents/Repos/phone32/phone32/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
