@@ -1,0 +1,17 @@
+[1/9] Performing build step for 'bootloader'
+[1/1] cd /Users/alexh/Documents/Repos/phone32/phone32/build/bootloader/esp-idf/esptool_py && /Users/alexh/.espressif/python_env/idf5.4_py3.13_env/bin/python /Users/alexh/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /Users/alexh/Documents/Repos/phone32/phone32/build/bootloader/bootloader.bin
+Bootloader binary size 0x5210 bytes. 0x2df0 bytes (36%) free.
+[2/9] No install step for 'bootloader'
+[3/9] Completed 'bootloader'
+[4/9] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/phone32.c.obj
+[5/9] Linking C static library esp-idf/main/libmain.a
+[6/9] Generating ld/sections.ld
+[7/9] Linking CXX executable phone32.elf
+[8/9] Generating binary image from built executable
+esptool.py v4.8.1
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+Generated /Users/alexh/Documents/Repos/phone32/phone32/build/phone32.bin
+[9/9] cd /Users/alexh/Documents/Repos/phone32/phone32/build/esp-idf/esptool_py && /Users/alexh/.espressif/python_env/idf5.4_py3.13_env/bin/python /Users/alexh/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/alexh/Documents/Repos/phone32/phone32/build/partition_table/partition-table.bin /Users/alexh/Documents/Repos/phone32/phone32/build/phone32.bin
+phone32.bin binary size 0x327f0 bytes. Smallest app partition is 0x100000 bytes. 0xcd810 bytes (80%) free.
