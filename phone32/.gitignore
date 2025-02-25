@@ -1,9 +1,11 @@
+build/
+
 # sdkconfig (secrets)
 sdkconfig
 sdkconfig.*
 
-build/
-
+# vim swap files
+*.swp
 
 # Prerequisites
 *.d
