@@ -1,4 +1,9 @@
+# sdkconfig (secrets)
+sdkconfig
+sdkconfig.*
+
 build/
+
 
 # Prerequisites
 *.d
