@@ -192,7 +192,6 @@ static esp_err_t wifi_init_sta(void)
     }
 }
 
-/*
 static void on_ping_success(esp_ping_handle_t hdl, void *args) {
   ESP_LOGI(TAG, "ping success");
 }
@@ -205,7 +204,6 @@ static void on_ping_end(esp_ping_handle_t hdl, void *args) {
   ESP_LOGI(TAG, "ping end");
   esp_ping_delete_session(hdl);
 }
-*/
 
 /*
 static void wifi_task(void *pvParameters) {
@@ -291,8 +289,9 @@ void run_voip(void)
       ESP_LOGI(TAG, "~~~~~~~~~~~");
     }
 
-    //initialize_ping(PING_TARGET_ADDR, on_ping_success, on_ping_timeout, on_ping_end);
+    initialize_ping(PING_TARGET_ADDR, on_ping_success, on_ping_timeout, on_ping_end);
     
+    return;
     // create socket to use
     struct sockaddr_in *dest_addr_ip4;
     dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
