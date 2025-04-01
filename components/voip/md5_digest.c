@@ -6,7 +6,7 @@
 #include "md5_digest.h"
 
 // NOTE: dest MUST be at least of size MD5_DIGEST_LENGTH*2 (to store hex encoding)
-static int get_md5_string(char * dest, uint8_t * src, size_t src_len) {
+static void get_md5_string(char * dest, uint8_t * src, size_t src_len) {
 
   uint8_t md[MD5_DIGEST_LENGTH];
 
@@ -14,13 +14,13 @@ static int get_md5_string(char * dest, uint8_t * src, size_t src_len) {
   mbedtls_md5_context ctx;
   mbedtls_md5_init(&ctx);
   if (mbedtls_md5_starts(&ctx)) {
-    return 1;
+    return;
   }
   if (mbedtls_md5_update(&ctx, src, src_len)) {
-    return 1;
+    return;
   }
   if (mbedtls_md5_finish(&ctx, md)) {
-    return 1;
+    return;
   }
   mbedtls_md5_free(&ctx);
 
@@ -42,7 +42,7 @@ static int get_md5_string(char * dest, uint8_t * src, size_t src_len) {
       dest[(i << 1) + 1] = low_nibble + 87;
     }
   }
-  return 0;
+  return;
 }
 
 int get_digest(char * dest,

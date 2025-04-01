@@ -18,13 +18,13 @@
 #include "esp_netif.h"
 #include "esp_random.h"
 
-#include "ping/ping_sock.h"
+//#include "ping/ping_sock.h"
 #include "lwip/sockets.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "lwip/netdb.h"
 
-#include "ping_init.h"
+//#include "ping_init.h"
 #include "voip.h"
 #include "md5_digest.h"
 
@@ -32,7 +32,7 @@ static const char *TAG = "voip";
 
 #define SRC_PORT 65300
 #define SIP_PORT 5060
-#define BUF_LEN 1024
+#define BUF_LEN 750
 
 #define STUN_PORT 3478 // default STUN server port
 #define STUN_ADDR "74.125.250.129" // stun.l.google.com
@@ -47,7 +47,7 @@ struct stun_msg_hdr {
   uint32_t transaction_id[3];
 };
 
-char * reg =
+const char * reg =
   "REGISTER %s SIP/2.0\n"
   "Via: SIP/2.0/UDP %s:%s;branch=%s\n"
   "From: <%s>;tag=%s\n"
@@ -81,8 +81,7 @@ const char * invite =
   "Contact: <sip:%s@%s:%s;ob>\n"
   "CSeq: %s INVITE\n"
   "Content-Type: application/sdp\n"
-  "Content-Length: %s\n\n"
-  "%s";
+  "Content-Length: %s\n\n";
 
 const char * auth_invite =
   "INVITE sip:%s@chicago.voip.ms SIP/2.0\n"
@@ -108,6 +107,7 @@ const char * call_number = CONFIG_VOIP_CALL_NUMBER;
 const char * username = CONFIG_VOIP_USERNAME;
 const char * password = CONFIG_VOIP_PASSWORD;
 
+/*
 static void on_ping_success(esp_ping_handle_t hdl, void *args) {
   ESP_LOGI(TAG, "ping success");
 }
@@ -120,6 +120,7 @@ static void on_ping_end(esp_ping_handle_t hdl, void *args) {
   ESP_LOGI(TAG, "ping end");
   esp_ping_delete_session(hdl);
 }
+*/
 
 int get_external_ip(char * ip_str) {
 
@@ -169,7 +170,6 @@ int get_external_ip(char * ip_str) {
   int err = sendto(sock, &stun_request, sizeof(stun_request), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
 
   if (err < 0) {
-    perror("sendto");
     close(sock);
     return 2;
   }
@@ -199,6 +199,293 @@ int get_external_ip(char * ip_str) {
   return 0;
 }
 
+int send_reg(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_len, char * external_ip_str) {
+
+  // Send the initial REGISTER request
+  int send_len = snprintf(buf, buf_len, reg,
+      "sip:chicago1.voip.ms",
+      external_ip_str,
+      "65300",
+      "z9hG4bKPjeac04633294241c78541dba3d8c5461b",
+      "sip:444138@chicago1.voip.ms",
+      "263df7334c424c518c978cf068c661f5",
+      "sip:444138@chicago1.voip.ms",
+      "263df7334c424c518c978cf068c661f5",
+      "sip:444138",
+      external_ip_str,
+      "65300");
+
+  if (send_len >= buf_len) {
+    ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", buf_len);
+    buf[buf_len - 1] = '\0';
+  }
+  else {
+    buf[send_len] = '\0';
+  }
+
+  size_t socklength = sizeof(*sip_sockaddr);
+  int err = sendto(sock, buf, send_len, 0, (struct sockaddr *)sip_sockaddr, socklength);
+  if (err < 0) {
+    ESP_LOGE(TAG, "sendto error");
+    close(sock);
+    return 1;
+  }
+
+  int rec_len = recvfrom(sock, buf, buf_len - 1, 0, (struct sockaddr *)sip_sockaddr, (socklen_t *)&socklength);
+  ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+  if (rec_len > buf_len) {
+    buf[buf_len - 1] = '\0';
+  }
+  else if (rec_len > 0) {
+    buf[rec_len] = '\0';
+  }
+  ESP_LOGI(TAG, "response: %s\n", buf);
+
+  // Check the type of the response (if 401 UNAUTHORIZED, re-authenticate)
+  char * code_str = strchr(buf, ' ') + 1;
+  char msg_code[4] = {'\0'};
+  strncpy(msg_code, code_str, 3);
+  if (!strcmp(msg_code, "200")) {
+    // OK, no need to authenticate
+    return 0;
+  }
+  else if (strcmp(msg_code, "401")) {
+    // message code is something other than 401 UNAUTHORIZED, return error
+    ESP_LOGE(TAG, "Error: message code = %s\n", msg_code);
+    return 2;
+  }
+
+  // Message code was 401 UNAUTHORIZED, authenticate with digest
+
+  char * auth_ptr = strstr(buf, "WWW-Authenticate");
+  if (auth_ptr == NULL) {
+    ESP_LOGE(TAG, "Error: auth field not found\n");
+    close(sock);
+    return 1;
+  }
+
+  char * da_str = "algorithm=";
+  auth_ptr = strstr(auth_ptr, da_str);
+  if (auth_ptr == NULL) {
+    return 3;
+  }
+
+  auth_ptr += strlen(da_str);
+  if (strncmp(auth_ptr, "MD5", 3)) {
+    return 4;
+  }
+
+  char * match_str = "realm=\"";
+  char * realm = strstr(auth_ptr, match_str) + strlen(match_str);
+
+  match_str = "nonce=\"";
+  char * nonce = strstr(realm, match_str) + strlen(match_str);
+
+  char * digest_uri = "sip:chicago1.voip.ms";
+  char * method = "REGISTER";
+
+  char digest_response[2 * MD5_DIGEST_LENGTH + 1];
+  digest_response[2 * MD5_DIGEST_LENGTH] = '\0';
+
+  err = get_digest(digest_response, auth_ptr, username, password, digest_uri, realm, nonce, method);
+  if (err == 1) {
+    return 1;
+  }
+  if (err == 2) {
+    return 1;
+  }
+
+  send_len = snprintf(buf, buf_len, auth_reg,
+      "sip:chicago1.voip.ms",
+      external_ip_str,
+      "65300",
+      "z9hG4bKPjeac04633294241c78541dba3d8c5461b",
+      "sip:444138@chicago1.voip.ms",
+      "263df7334c424c518c978cf068c661f5",
+      "sip:444138@chicago1.voip.ms",
+      "263df7334c424c518c978cf068c661f5",
+      "sip:444138",
+      external_ip_str,
+      "65300",
+      username,
+      realm,
+      nonce,
+      digest_uri,
+      digest_response,
+      "MD5");
+
+  if (send_len >= buf_len) {
+    ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", buf_len);
+    buf[buf_len - 1] = '\0';
+  }
+  else {
+    buf[send_len] = '\0';
+  }
+
+  err = sendto(sock, buf, send_len, 0, (struct sockaddr *)sip_sockaddr, socklength);
+  if (err < 0) {
+    ESP_LOGE(TAG, "sendto error");
+    return 1;
+  }
+
+  rec_len = recvfrom(sock, buf, buf_len - 1, 0, (struct sockaddr *)sip_sockaddr, (socklen_t *)&socklength);
+  ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+
+  return 0;
+}
+
+int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_len, char * external_ip_str) {
+
+  int send_len = snprintf(buf, buf_len, sdp_str,
+      "0",
+      external_ip_str,
+      "my_session");
+  buf[send_len] = '\0';
+
+  char len_as_str[10] = {'\0'};
+  snprintf(len_as_str, 10, "%d", send_len);
+
+  send_len = snprintf(buf, buf_len, invite,
+      call_number,
+      external_ip_str,
+      "65300",
+      "z9hG4bKPjfc7170ddca184cc38e1edaac48207ce7",
+      username,
+      "f2e78bb18e0f460e8724e9983319e1f3",
+      call_number,
+      "6948ac89686744c8b37f0ba3ba175e1b",
+      username,
+      external_ip_str,
+      "65300",
+      "3011",
+      len_as_str);
+
+  send_len += snprintf(buf + send_len, buf_len - send_len, sdp_str,
+      "0",
+      external_ip_str,
+      "my_session");
+
+  if (send_len >= buf_len) {
+    ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", buf_len);
+    buf[buf_len - 1] = '\0';
+  }
+  else {
+    buf[send_len] = '\0';
+  }
+
+  socklen_t socklength = sizeof(*sip_sockaddr);
+  int err = sendto(sock, buf, send_len, 0, (struct sockaddr *)sip_sockaddr, socklength);
+  if (err < 0) {
+    ESP_LOGE(TAG, "sendto error");
+    return 1;
+  }
+
+  int rec_len = recvfrom(sock, buf, buf_len - 1, 0, (struct sockaddr *)sip_sockaddr, &socklength);
+  ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+  if (rec_len > buf_len) {
+    buf[buf_len - 1] = '\0';
+  }
+  else if (rec_len > 0) {
+    buf[rec_len] = '\0';
+  }
+
+  char * auth_ptr = strstr(buf, "WWW-Authenticate");
+  if (auth_ptr == NULL) {
+    ESP_LOGE(TAG, "Error: auth field not found\n");
+    return 1;
+  }
+
+  char * da_str = "algorithm=";
+  auth_ptr = strstr(auth_ptr, da_str);
+  if (auth_ptr == NULL) {
+    return 1;
+  }
+
+  auth_ptr += strlen(da_str);
+  if (strncmp(auth_ptr, "MD5", 3)) {
+    return 2;
+  }
+
+  char * match_str = "realm=\"";
+  char * realm = strstr(auth_ptr, match_str) + strlen(match_str);
+
+  match_str = "nonce=\"";
+  char * nonce = strstr(realm, match_str) + strlen(match_str);
+
+  char * method = "INVITE";
+
+  char digest_response[2 * MD5_DIGEST_LENGTH + 1];
+  digest_response[2 * MD5_DIGEST_LENGTH] = '\0';
+
+  char * digest_uri = "sip:chicago1.voip.ms";
+
+  err = get_digest(digest_response, auth_ptr, username, password, digest_uri, realm, nonce, method);
+  if (err == 1) {
+    ESP_LOGE(TAG, "Error: digest algorithm not found\n");
+    return 1;
+  }
+  if (err == 2) {
+    ESP_LOGE(TAG, "Error: algorithm type not supported\n");
+    return 1;
+  }
+
+  ESP_LOGI(TAG, "final hash: %s\n", digest_response);
+
+  send_len = snprintf(buf, buf_len, auth_invite,
+      call_number,
+      external_ip_str,
+      "65300",
+      "z9hG4bKPjfc7170ddca184cc38e1edaac48207ce7",
+      username,
+      "f2e78bb18e0f460e8724e9983319e1f3",
+      call_number,
+      "6948ac89686744c8b37f0ba3ba175e1b",
+      username,
+      external_ip_str,
+      "65300",
+      "3012",
+      username,
+      realm,
+      nonce,
+      digest_uri,
+      digest_response,
+      "MD5",
+      len_as_str); // NOTE: this should be incorrect but works anyways -- auth message gets no SDP body
+
+  //send_len += snprintf(buf + send_len, buf_len - send_len, sdp_str,
+  //    "0",
+  //    external_ip_str,
+  //    "my_session");
+
+  if (send_len >= buf_len) {
+    ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", buf_len);
+    buf[buf_len - 1] = '\0';
+  }
+  else {
+    buf[send_len] = '\0';
+  }
+
+  ESP_LOGI(TAG, "response:\n%s", buf);
+
+  err = sendto(sock, buf, send_len, 0, (struct sockaddr *)sip_sockaddr, socklength);
+  if (err < 0) {
+    ESP_LOGE(TAG, "sendto error");
+    return 1;
+  }
+
+  rec_len = recvfrom(sock, buf, buf_len - 1, 0, (struct sockaddr *)sip_sockaddr, &socklength);
+  ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+  if (rec_len > buf_len) {
+    buf[buf_len - 1] = '\0';
+  }
+  else if (rec_len > 0) {
+    buf[rec_len] = '\0';
+  }
+  ESP_LOGI(TAG, "response:\n%s", buf);
+
+  return 0;
+}
+
 void run_voip(void) {
 
   //initialize_ping("10.0.17.158", on_ping_success, on_ping_timeout, on_ping_end);
@@ -222,40 +509,65 @@ void run_voip(void) {
       return;
   }
   ESP_LOGI(TAG, "External IP: %s", external_ip_str);
-  return;
 
-    // create socket to use
-    struct sockaddr_in dest_addr_ip4;
-    dest_addr_ip4.sin_addr.s_addr = htonl(INADDR_ANY);
-    dest_addr_ip4.sin_family = AF_INET;
-    dest_addr_ip4.sin_port = htons(65300);
+  struct hostent * sip_host = gethostbyname(hostname);
+  if (sip_host->h_addrtype != AF_INET) {
+    ESP_LOGE(TAG, "Error: address type not IPv4\n");
+    return;
+  }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-      ESP_LOGE(TAG, "Error: unable to create socket");
-      return;
-    }
+  char * host_addr_str = inet_ntoa(*(struct in_addr *)sip_host->h_addr);
+  ESP_LOGI(TAG, "IP address: %s\n", host_addr_str);
 
-    ESP_LOGI(TAG, "Socket created");
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    ESP_LOGE(TAG, "Error: unable to create socket\n");
+    return;
+  }
 
-    struct timeval timeout;
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 10;
-    setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+  struct timeval timeout;
+  timeout.tv_sec = 10;
+  timeout.tv_usec = 0;
+  setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    err = bind(sock, (struct sockaddr *)&dest_addr_ip4, sizeof(dest_addr_ip4));
-    if (err < 0) {
-      ESP_LOGE(TAG, "Error: unable to bind socket");
-      return;
-    }
+  struct sockaddr_in src_addr;
+  memset(&src_addr, 0, sizeof(src_addr));
+  src_addr.sin_family = AF_INET;
+  src_addr.sin_addr.s_addr = INADDR_ANY;
+  src_addr.sin_port = htons(SRC_PORT);
+  err = bind(sock, (struct sockaddr *)&src_addr, sizeof(src_addr));
+  if (err < 0) {
+    ESP_LOGE(TAG, "Error: unable to bind socket\n");
+    return;
+  }
 
-    ESP_LOGI(TAG, "Socket bound, port %d", ntohs(dest_addr_ip4.sin_port));
+  struct sockaddr_in sip_sockaddr;
+  memset(&sip_sockaddr, 0, sizeof(struct sockaddr_in));
+  sip_sockaddr.sin_family = AF_INET;
+  sip_sockaddr.sin_port = htons(SIP_PORT);
+  memcpy(&sip_sockaddr.sin_addr, sip_host->h_addr, sizeof(struct in_addr));
 
-    // register with SIP server (twice, handle nonce)
-    // -- should also initialize task to send NAT keepalive messages at an interval
+  char buf[BUF_LEN];
 
-    // invite phone number specified in Kconfig (handle 401 unauthorized, respond with ACK and another INVITE
+  err = send_reg(sock, &sip_sockaddr, buf, BUF_LEN, external_ip_str);
+  if (err) {
+    ESP_LOGE(TAG, "Error: send_reg failed with return value %d\n", err);
+    return;
+  }
 
-    // handle state from here (trying, ringing, ...)
+  // parse response, calculate auth response and re-send
+  // NOTE: assuming the first response will be of type 401 Unauthorized
+
+  // Client is properly authenticated with the server, send invite to phone number
+  // Response will be 401 Unauthorized, send ACK then calculate MD5 sum and re-send with updated digest hash
+
+  // Send initial invite message (unauthorized)
+  err = send_invite(sock, &sip_sockaddr, buf, BUF_LEN, external_ip_str);
+  if (err) {
+    ESP_LOGE(TAG, "Error: send_invite failed with return value %d\n", err);
+    return;
+  }
+
+  close(sock);
 
 }
