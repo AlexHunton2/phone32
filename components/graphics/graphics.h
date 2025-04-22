@@ -1,8 +1,14 @@
 #ifndef _GRAPHICS_H_
 #define _GRAPHICS_H_
 
-#include "lvgl__lvgl/lvgl.h"
+#include "esp_log.h"
+#include "lvgl.h"
+
+#include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
+
+#include "drivers.h"
 
 #define GFX_OK 0;
 #define GFX_ERR 1;

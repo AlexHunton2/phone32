@@ -181,6 +181,7 @@ void app_main(void) {
   graphics_init();
 
   // Initialize NVS
+  /*
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
       ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -214,6 +215,7 @@ void app_main(void) {
   }
 
   run_voip();
+  */
   // char final[MD5_DIGEST_LENGTH * 2 + 1];
   // final[MD5_DIGEST_LENGTH * 2] = '\0';
   // char * input = "Hello World!";

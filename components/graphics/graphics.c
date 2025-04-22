@@ -1,7 +1,13 @@
 #include "graphics.h"
-#include "waveshare_rgb_lcd_port.h"
 
+#include "display/lv_display.h"
+#include "drivers.h"
 #include "fonts/impact_60.c"
+#include "lv_init.h"
+#include "lvglport.h"
+#include "music/lv_demo_music.h"
+#include "widgets/lv_demo_widgets.h"
+
 #include "images/chicken_jockey.c"
 
 // error handling:
@@ -94,11 +100,10 @@ GFX_CALL init_lock_screen(void) {
   lv_obj_t *front_img = lv_img_create(lock_screen);
 
   static lv_img_dsc_t chicken_jockey_dsc = {
-      .header.always_zero = 0,
       .header.w = 480,
       .header.h = 480,
       .data_size = 480 * 480 * LV_COLOR_DEPTH / 8,
-      .header.cf = LV_IMG_CF_TRUE_COLOR, /*Set the color format*/
+      .header.cf = LV_COLOR_FORMAT_RGB565, /*Set the color format*/
       .data = chicken_jockey_map,
   };
 
@@ -200,10 +205,31 @@ GFX_CALL set_active_screen(screen_entry_t *screen_entry) {
 }
 
 GFX_CALL graphics_init(void) {
-  waveshare_esp32_s3_rgb_lcd_init();
+  // 1. Initialzie LVGL
+  lv_init();
 
-  if (lvgl_port_lock(-1)) {
-    ESP_LOGI(WAVESHARE_TAG, "Loading Phone32 Graphics...");
+  // 2. Initialize Drivers
+  esp_lcd_panel_handle_t lcd_handle = NULL;
+  esp_lcd_touch_handle_t tp_handle = NULL;
+
+  init_lcd_driver(&lcd_handle);
+  init_touch_driver(&tp_handle);
+
+  // 3. Connect Tick Interface
+  lv_tick_set_cb(xTaskGetTickCount);
+
+  // 4. Connect Display Interface
+  lvport_connect_display_interface(&lcd_handle);
+
+  // 5. Connect Touch Interface
+  lvport_connect_touch_interface(&tp_handle);
+
+  // 6. Timer Handler Setup
+  xTaskCreatePinnedToCore(lvport_timer_handler_task, "LVGL Task", 1024 * 8,
+                          NULL, 2, NULL, 1);
+
+  if (lvport_lock(-1)) {
+    ESP_LOGI(GRAPHICS_TAG, "Loading Phone32 Graphics...");
     register_main_screens();
     initialize_fonts();
 
@@ -219,7 +245,7 @@ GFX_CALL graphics_init(void) {
       emit_gfx_err();
     }
 
-    lvgl_port_unlock();
+    lvport_unlock();
   }
 
   return GFX_OK;
