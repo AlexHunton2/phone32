@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_random.h"
+#include "freertos/semphr.h"
 
 //#include "ping/ping_sock.h"
 #include "lwip/sockets.h"
@@ -27,6 +28,7 @@
 //#include "ping_init.h"
 #include "voip.h"
 #include "md5_digest.h"
+#include "rtp.h"
 
 static const char *TAG = "voip";
 
@@ -39,6 +41,10 @@ static const char *TAG = "voip";
 #define STUN_BINDING_REQUEST 0x0001
 #define STUN_MAGIC_COOKIE 0x2112A442
 #define STUN_SUCCESS 0x0101
+
+#define RTP_PORT 4000
+#define RTP_BUF_COUNT 3
+
 
 struct stun_msg_hdr {
   uint16_t msg_type;
@@ -95,17 +101,33 @@ const char * auth_invite =
   "Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"%s\", response=\"%s\", algorithm=%s\n"
   "Content-Length: %s\n\n";
 
+const char * ack_str =
+  "ACK %s SIP/2.0\n"
+  "Via: SIP/2.0/UDP %s:%s;branch=%s\n"
+  "From: <sip:%s@chicago1.voip.ms>;tag=%s\n"
+  "To: <sip:%s@chicago1.voip.ms>;tag=%s\n"
+  "CSeq: %s ACK\n"
+  "Call-ID: %s\n"
+  "Content-Length: 0\n\n";
+
 const char * sdp_str =
   "v=%s\n"
   "o=- 3949402524 3949402524 IN IP4 %s\n"
   "s=%s\n"
   "t=0 0\n"
-  "m=audio 4006 RTP/AVP 8 0 101\n";
+  "c=IN IP4 %s\n"
+  "m=audio 4000 RTP/AVP 0\n"
+  "a=rtpmap:0 PCMU/8000\n";
 
 const char * hostname = CONFIG_VOIP_HOSTNAME;
 const char * call_number = CONFIG_VOIP_CALL_NUMBER;
 const char * username = CONFIG_VOIP_USERNAME;
 const char * password = CONFIG_VOIP_PASSWORD;
+
+/* parameters to send to taskSend and taskReceive */
+
+uint16_t dest_port;
+struct taskSendArgs sendArgs;
 
 /*
 static void on_ping_success(esp_ping_handle_t hdl, void *args) {
@@ -260,6 +282,7 @@ int send_reg(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_le
   char * auth_ptr = strstr(buf, "WWW-Authenticate");
   if (auth_ptr == NULL) {
     ESP_LOGE(TAG, "Error: auth field not found\n");
+    ESP_LOGI(TAG, "Message:\n%s\n", buf);
     close(sock);
     return 1;
   }
@@ -336,10 +359,12 @@ int send_reg(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_le
 
 int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_len, char * external_ip_str) {
 
-  int send_len = snprintf(buf, buf_len, sdp_str,
+  int sdp_len = snprintf(buf, buf_len, sdp_str,
       "0",
       external_ip_str,
-      "my_session");
+      "my_session",
+      external_ip_str);
+  int send_len = sdp_len;
   buf[send_len] = '\0';
 
   char len_as_str[10] = {'\0'};
@@ -363,7 +388,8 @@ int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf
   send_len += snprintf(buf + send_len, buf_len - send_len, sdp_str,
       "0",
       external_ip_str,
-      "my_session");
+      "my_session",
+      external_ip_str);
 
   if (send_len >= buf_len) {
     ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", buf_len);
@@ -392,6 +418,7 @@ int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf
   char * auth_ptr = strstr(buf, "WWW-Authenticate");
   if (auth_ptr == NULL) {
     ESP_LOGE(TAG, "Error: auth field not found\n");
+    ESP_LOGI(TAG, "Message:\n%s\n", buf);
     return 1;
   }
 
@@ -452,6 +479,12 @@ int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf
       "MD5",
       len_as_str); // NOTE: this should be incorrect but works anyways -- auth message gets no SDP body
 
+  send_len += snprintf(buf + send_len, buf_len - send_len, sdp_str,
+      "0",
+      external_ip_str,
+      "my_session",
+      external_ip_str);
+
   //send_len += snprintf(buf + send_len, buf_len - send_len, sdp_str,
   //    "0",
   //    external_ip_str,
@@ -503,7 +536,8 @@ void run_voip(void) {
       return;
     case 3:
       ESP_LOGE(TAG, "external_ip packet format error");
-      return;
+      strcpy(external_ip_str, "127.0.0.1");
+      break;
     case 4:
       ESP_LOGE(TAG, "external_ip inet_ntop error");
       return;
@@ -541,7 +575,8 @@ void run_voip(void) {
     return;
   }
 
-  struct sockaddr_in sip_sockaddr;
+  struct sockaddr_in sip_sockaddr; // -- this is now a global variable
+  socklen_t socklength = sizeof(sip_sockaddr);
   memset(&sip_sockaddr, 0, sizeof(struct sockaddr_in));
   sip_sockaddr.sin_family = AF_INET;
   sip_sockaddr.sin_port = htons(SIP_PORT);
@@ -568,6 +603,146 @@ void run_voip(void) {
     return;
   }
 
-  close(sock);
+  // buffer contains response to invite, check to make sure it is 100 TRYING
+  char * sip_ver = "SIP/2.0 ";
+  if (strncmp(sip_ver, buf, strlen(sip_ver))) {
+    // incorrect response format
+    ESP_LOGE(TAG, "Error: response formatted incorrectly");
+    return;
+  }
 
+  char * response_type = buf + strlen(sip_ver);
+  if (strncmp(response_type, "100", 3)) {
+    // unknown
+    ESP_LOGE(TAG, "Error: response has unknown status code: %s", response_type);
+    return;
+  }
+
+  // server is TRYING, wait for RINGING or SESSION PROGRESS
+
+  ssize_t rec_len = recvfrom(sock, buf, BUF_LEN - 1, 0, (struct sockaddr *)&sip_sockaddr, &socklength);
+  ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+  if (rec_len > BUF_LEN) {
+    buf[BUF_LEN - 1] = '\0';
+  }
+  else if (rec_len > 0) {
+    buf[BUF_LEN] = '\0';
+  }
+
+  // HANDLE RTP STREAMS AND TASK CREATION
+
+  int running_rtp = 0;
+  if (strncmp(sip_ver, buf, strlen(sip_ver))) {
+    // incorrect response format
+    ESP_LOGE(TAG, "Error: response formatted incorrectly");
+    return;
+  }
+
+  response_type = buf + strlen(sip_ver);
+  if (!strncmp(response_type, "180", 3)) {
+    // RINGING -- wait for OK
+  }
+  else if (!strncmp(response_type, "183", 3)) {
+    // SESSION PROGRESS -- get dest RTP port and initiate RTP streams
+    char * sdp_pre = "m=audio ";
+    char * sdp_m = strstr(buf, sdp_pre);
+    if (!sdp_m) {
+      // Substring not found (no sdp m specifier?)
+      ESP_LOGE(TAG, "Error: session progress doesn't contain destination port");
+      return;
+    }
+    sdp_m += strlen(sdp_pre);
+    char * port_end = strchr(sdp_m, ' ');
+    *port_end = '\0';
+    int dport = atoi(sdp_m);
+    dest_port = (uint16_t)dport;
+    ESP_LOGI(TAG, "dest_port: %d\n", dest_port);
+
+    sendArgs.dest_port = dest_port;
+    sendArgs.src_port = RTP_PORT;
+    sendArgs.sip_sockaddr = sip_sockaddr;
+
+    ESP_LOGI(TAG, "SESSION PROGRESS, initializing rtp semaphores");
+    uint16_t rtp_port = RTP_PORT;
+    rtp_init(rtp_port);
+    BaseType_t tret = xTaskCreate(taskReceive, "TaskReceive", 4096, NULL, 1, NULL);
+    if (tret != pdPASS) {
+      ESP_LOGE(TAG, "Error: couldn't create receive task");
+      return;
+    }
+    ESP_LOGI(TAG, "Created taskReceive");
+    tret = xTaskCreate(taskSend, "TaskSend", 4096, &sendArgs, 1, NULL);
+    if (tret != pdPASS) {
+      ESP_LOGE(TAG, "Error: couldn't create send task");
+      return;
+    }
+    ESP_LOGI(TAG, "Created taskSend");
+  }
+  else {
+    // unknown
+    ESP_LOGE(TAG, "Error: response has unknown status code: %s", response_type);
+    return;
+  }
+
+  // listen for more SIP messages (OK, BYE)
+  int send_len;
+  while (1) {
+
+    ESP_LOGI(TAG, "Listening for SIP messages");
+    rec_len = recvfrom(sock, buf, BUF_LEN - 1, 0, (struct sockaddr *)&sip_sockaddr, &socklength);
+    ESP_LOGI(TAG, "Received %d bytes\n", rec_len);
+    if (rec_len > BUF_LEN) {
+      buf[BUF_LEN - 1] = '\0';
+    }
+    else if (rec_len > 0) {
+      buf[BUF_LEN] = '\0';
+    }
+    if (rec_len < 0) {
+      // no bytes received, continue
+      continue;
+    }
+    ESP_LOGI(TAG, "Message:\n%s", buf);
+
+    response_type = buf + strlen(sip_ver);
+    if (!strncmp(response_type, "200", 3)) { // OK
+      // send ACK in response
+      char to_tag[50];
+      memset(to_tag, 0, 50);
+      char * tag_start = strstr(buf, "tag=");
+      tag_start += 4;
+      tag_start = strstr(tag_start, "tag=");
+      tag_start += 4;
+      char * tag_end = strstr(tag_start, "\n");
+      strncpy(to_tag, tag_start, tag_end - tag_start);
+      send_len = snprintf(buf, BUF_LEN, ack_str,
+          "sip:2245711812@208.100.60.8:5060",
+          external_ip_str,
+          "65300",
+          "z9hG4bKPjfc7170ddca184cc38e1edaac48207ce7",
+          username,
+          "f2e78bb18e0f460e8724e9983319e1f3",
+          call_number,
+          to_tag,
+          "3012",
+          "6948ac89686744c8b37f0ba3ba175e1b");
+
+      if (send_len >= BUF_LEN) {
+        ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", BUF_LEN);
+        buf[BUF_LEN - 1] = '\0';
+      }
+      else {
+        buf[send_len] = '\0';
+      }
+      ESP_LOGI(TAG, "Sending Response:\n%s", buf);
+      err = sendto(sock, buf, send_len, 0, (struct sockaddr *)&sip_sockaddr, socklength);
+      if (err < 0) {
+        ESP_LOGE(TAG, "sendto error");
+        return;
+      }
+
+    }
+
+  }
+
+  close(sock);
 }
