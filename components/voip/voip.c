@@ -53,6 +53,14 @@ struct stun_msg_hdr {
   uint32_t transaction_id[3];
 };
 
+struct sip_msg {
+  char * branch;
+  char * tag_from;
+  char * tag_to;
+  char * call_id;
+  char * cseq;
+};
+
 const char * reg =
   "REGISTER %s SIP/2.0\n"
   "Via: SIP/2.0/UDP %s:%s;branch=%s\n"
@@ -119,8 +127,16 @@ const char * sdp_str =
   "m=audio 4000 RTP/AVP 0\n"
   "a=rtpmap:0 PCMU/8000\n";
 
+const char * ok_str =
+  "SIP/2.0 200 OK\n"
+  "Via: %s\n"
+  "From: %s\n"
+  "To: %s\n"
+  "Call-ID: %s\n"
+  "CSeq: %s\n\n";
+
 const char * hostname = CONFIG_VOIP_HOSTNAME;
-const char * call_number = CONFIG_VOIP_CALL_NUMBER;
+//const char * call_number = CONFIG_VOIP_CALL_NUMBER;
 const char * username = CONFIG_VOIP_USERNAME;
 const char * password = CONFIG_VOIP_PASSWORD;
 
@@ -357,7 +373,7 @@ int send_reg(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_le
   return 0;
 }
 
-int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_len, char * external_ip_str) {
+int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf_len, char * external_ip_str, char * call_number) {
 
   int sdp_len = snprintf(buf, buf_len, sdp_str,
       "0",
@@ -519,44 +535,44 @@ int send_invite(int sock, struct sockaddr_in * sip_sockaddr, char * buf, int buf
   return 0;
 }
 
-void run_voip(void) {
+static char external_ip_str[INET_ADDRSTRLEN];
+static int sock;
+static struct sockaddr_in sip_sockaddr;
 
-  //initialize_ping("10.0.17.158", on_ping_success, on_ping_timeout, on_ping_end);
-  //return;
+int register_sip() {
 
   // get external ip
-  char external_ip_str[INET_ADDRSTRLEN];
   int err = get_external_ip(external_ip_str);
   switch (err) {
     case 1:
       ESP_LOGE(TAG, "external_ip socket error");
-      return;
+      return 1;
     case 2:
       ESP_LOGE(TAG, "external_ip sendto error");
-      return;
+      return 1;
     case 3:
       ESP_LOGE(TAG, "external_ip packet format error");
       strcpy(external_ip_str, "127.0.0.1");
       break;
     case 4:
       ESP_LOGE(TAG, "external_ip inet_ntop error");
-      return;
+      return 1;
   }
   ESP_LOGI(TAG, "External IP: %s", external_ip_str);
 
   struct hostent * sip_host = gethostbyname(hostname);
   if (sip_host->h_addrtype != AF_INET) {
     ESP_LOGE(TAG, "Error: address type not IPv4\n");
-    return;
+    return 1;
   }
 
   char * host_addr_str = inet_ntoa(*(struct in_addr *)sip_host->h_addr);
   ESP_LOGI(TAG, "IP address: %s\n", host_addr_str);
 
-  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  sock = socket(AF_INET, SOCK_DGRAM, 0);
   if (sock < 0) {
     ESP_LOGE(TAG, "Error: unable to create socket\n");
-    return;
+    return 1;
   }
 
   struct timeval timeout;
@@ -572,10 +588,10 @@ void run_voip(void) {
   err = bind(sock, (struct sockaddr *)&src_addr, sizeof(src_addr));
   if (err < 0) {
     ESP_LOGE(TAG, "Error: unable to bind socket\n");
-    return;
+    return 1;
   }
 
-  struct sockaddr_in sip_sockaddr; // -- this is now a global variable
+  //struct sockaddr_in sip_sockaddr; // -- this is now a global variable
   socklen_t socklength = sizeof(sip_sockaddr);
   memset(&sip_sockaddr, 0, sizeof(struct sockaddr_in));
   sip_sockaddr.sin_family = AF_INET;
@@ -587,17 +603,20 @@ void run_voip(void) {
   err = send_reg(sock, &sip_sockaddr, buf, BUF_LEN, external_ip_str);
   if (err) {
     ESP_LOGE(TAG, "Error: send_reg failed with return value %d\n", err);
-    return;
+    return 1;
   }
 
-  // parse response, calculate auth response and re-send
-  // NOTE: assuming the first response will be of type 401 Unauthorized
+  return 0;
+}
 
-  // Client is properly authenticated with the server, send invite to phone number
-  // Response will be 401 Unauthorized, send ACK then calculate MD5 sum and re-send with updated digest hash
+void make_call(char * call_number) {
+  // client is already registered with the server
+
+  char buf[BUF_LEN];
+  socklen_t socklength = sizeof(sip_sockaddr);
 
   // Send initial invite message (unauthorized)
-  err = send_invite(sock, &sip_sockaddr, buf, BUF_LEN, external_ip_str);
+  int err = send_invite(sock, &sip_sockaddr, buf, BUF_LEN, external_ip_str, call_number);
   if (err) {
     ESP_LOGE(TAG, "Error: send_invite failed with return value %d\n", err);
     return;
@@ -703,43 +722,220 @@ void run_voip(void) {
     }
     ESP_LOGI(TAG, "Message:\n%s", buf);
 
-    response_type = buf + strlen(sip_ver);
-    if (!strncmp(response_type, "200", 3)) { // OK
-      // send ACK in response
-      char to_tag[50];
-      memset(to_tag, 0, 50);
-      char * tag_start = strstr(buf, "tag=");
-      tag_start += 4;
-      tag_start = strstr(tag_start, "tag=");
-      tag_start += 4;
-      char * tag_end = strstr(tag_start, "\n");
-      strncpy(to_tag, tag_start, tag_end - tag_start);
-      send_len = snprintf(buf, BUF_LEN, ack_str,
-          "sip:2245711812@208.100.60.8:5060",
-          external_ip_str,
-          "65300",
-          "z9hG4bKPjfc7170ddca184cc38e1edaac48207ce7",
-          username,
-          "f2e78bb18e0f460e8724e9983319e1f3",
-          call_number,
-          to_tag,
-          "3012",
-          "6948ac89686744c8b37f0ba3ba175e1b");
+    if (!strncmp(buf, sip_ver, strlen(sip_ver))) {
+      // SIP RESPONSE
+      response_type = buf + strlen(sip_ver);
+      if (!strncmp(response_type, "200", 3)) { // OK
+        // send ACK in response
+        char to_tag[50];
+        memset(to_tag, 0, 50);
+        char * tag_start = strstr(buf, "tag=");
+        tag_start += 4;
+        tag_start = strstr(tag_start, "tag=");
+        tag_start += 4;
+        char * tag_end = strstr(tag_start, "\n");
+        strncpy(to_tag, tag_start, tag_end - tag_start);
+        send_len = snprintf(buf, BUF_LEN, ack_str,
+            "sip:2245711812@208.100.60.8:5060",
+            external_ip_str,
+            "65300",
+            "z9hG4bKPjfc7170ddca184cc38e1edaac48207ce7",
+            username,
+            "f2e78bb18e0f460e8724e9983319e1f3",
+            call_number,
+            to_tag,
+            "3012",
+            "6948ac89686744c8b37f0ba3ba175e1b");
 
-      if (send_len >= BUF_LEN) {
-        ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", BUF_LEN);
-        buf[BUF_LEN - 1] = '\0';
-      }
-      else {
-        buf[send_len] = '\0';
-      }
-      ESP_LOGI(TAG, "Sending Response:\n%s", buf);
-      err = sendto(sock, buf, send_len, 0, (struct sockaddr *)&sip_sockaddr, socklength);
-      if (err < 0) {
-        ESP_LOGE(TAG, "sendto error");
-        return;
-      }
+        if (send_len >= BUF_LEN) {
+          ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", BUF_LEN);
+          buf[BUF_LEN - 1] = '\0';
+        }
+        else {
+          buf[send_len] = '\0';
+        }
+        ESP_LOGI(TAG, "Sending Response:\n%s", buf);
+        err = sendto(sock, buf, send_len, 0, (struct sockaddr *)&sip_sockaddr, socklength);
+        if (err < 0) {
+          ESP_LOGE(TAG, "sendto error");
+          return;
+        }
 
+      }
+    }
+    else {
+      // SIP REQUEST
+      if (!strncmp(buf, "BYE", 3)) {
+        // BYE request, send OK
+        char str_buf[400];
+        char * str_ptr = str_buf;
+        char * ptr = strstr(buf, "Via: ");
+        if (!ptr) {
+          ESP_LOGE(TAG, "Error: via not found");
+          return;
+        }
+        ptr += strlen("Via: ");
+        char * ptr_end = strchr(ptr, '\n');
+        char * vialine = strncpy(str_ptr, ptr, ptr_end - ptr);
+        str_ptr += ptr_end - ptr;
+        *str_ptr = '\0';
+        str_ptr++;
+        ESP_LOGI(TAG, "vialine: %s\n", vialine);
+        ptr = strstr(buf, "From: ");
+        if (!ptr) {
+          ESP_LOGE(TAG, "Error: from not found");
+          return;
+        }
+        ptr += strlen("From: ");
+        ptr_end = strchr(ptr, '\n');
+        char * fromline = strncpy(str_ptr, ptr, ptr_end - ptr);
+        str_ptr += ptr_end - ptr;
+        *str_ptr = '\0';
+        str_ptr++;
+        ESP_LOGI(TAG, "fromline: %s\n", fromline);
+        ptr = strstr(buf, "To: ");
+        if (!ptr) {
+          ESP_LOGE(TAG, "Error: to not found");
+          return;
+        }
+        ptr += strlen("To: ");
+        ptr_end = strchr(ptr, '\n');
+        char * toline = strncpy(str_ptr, ptr, ptr_end - ptr);
+        str_ptr += ptr_end - ptr;
+        *str_ptr = '\0';
+        str_ptr++;
+        ESP_LOGI(TAG, "toline: %s\n", toline);
+        ptr = strstr(buf, "Call-ID: ");
+        if (!ptr) {
+          ESP_LOGE(TAG, "Error: to not found");
+          return;
+        }
+        ptr += strlen("Call-ID: ");
+        ptr_end = strchr(ptr, '\n');
+        char * call_id = strncpy(str_ptr, ptr, ptr_end - ptr);
+        str_ptr += ptr_end - ptr;
+        *str_ptr = '\0';
+        str_ptr++;
+        ESP_LOGI(TAG, "call_id: %s\n", call_id);
+        ptr = strstr(buf, "CSeq: ");
+        if (!ptr) {
+          ESP_LOGE(TAG, "Error: cseq not found");
+          return;
+        }
+        ptr += strlen("CSeq: ");
+        ptr_end = strchr(ptr, '\n');
+        char * cseq = strncpy(str_ptr, ptr, ptr_end - ptr);
+        str_ptr += ptr_end - ptr;
+        *str_ptr = '\0';
+        ESP_LOGI(TAG, "cseq: %s\n", cseq);
+        if (str_ptr - str_buf > 400) {
+          ESP_LOGE(TAG, "buffer overflow");
+          return;
+        }
+        //char * ptr = strstr(buf, "branch=") + strlen("branch=");
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: branch= not found");
+        //  return;
+        //}
+        //char * ptr_end = strchr(ptr, ';');
+        //if (!ptr_end) {
+        //  ESP_LOGE(TAG, "Error: branch= to ; not found");
+        //  return;
+        //}
+
+        //char * branch = strncpy(str_ptr, ptr, ptr_end - ptr);
+        //str_ptr += ptr_end - ptr;
+        //*str_ptr = '\0';
+        //str_ptr++;
+        //ESP_LOGI(TAG, "branch=%s\n", branch);
+        //ptr = ptr_end + 1;
+        //ptr = strstr(ptr, "tag=") + strlen("tag=");
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: tag= not found");
+        //  return;
+        //}
+        //ptr_end = strchr(ptr, '\n');
+        //if (!ptr_end) {
+        //  ESP_LOGE(TAG, "Error: tag= to \\n not found");
+        //  return;
+        //}
+        //char * tag1 = strncpy(str_ptr, ptr, ptr_end - ptr);
+        //str_ptr += ptr_end - ptr;
+        //*str_ptr = '\0';
+        //str_ptr++;
+        //ptr = ptr_end + 1;
+        //ptr = strstr(ptr, "tag=") + strlen("tag=");
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: tag= not found");
+        //  return;
+        //}
+        //ptr_end = strchr(ptr, '\n');
+        //if (!ptr_end) {
+        //  ESP_LOGE(TAG, "Error: tag= to \\n not found");
+        //  return;
+        //}
+        //char * tag2 = strncpy(str_ptr, ptr, ptr_end - ptr);
+        //str_ptr += ptr_end - ptr;
+        //*str_ptr = '\0';
+        //str_ptr++;
+        //ptr = ptr_end + 1;
+        //ESP_LOGI(TAG, "BUF:\n%s\n", buf);
+        //ptr = strstr(buf, "Call-ID: ") + strlen("Call-ID: ");
+        //ESP_LOGI(TAG, "ptr: %p", ptr);
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: Call-ID: not found");
+        //  return;
+        //}
+        //ptr_end = strchr(ptr, '\n');
+        //if (!ptr_end) {
+        //  ESP_LOGE(TAG, "Error: Call-ID to \\n not found");
+        //  return;
+        //}
+        //ESP_LOGI(TAG, "%s", ptr);
+        //char * call_id = strncpy(str_ptr, ptr, ptr_end - ptr);
+        //str_ptr += ptr_end - ptr;
+        //*str_ptr = '\0';
+        //str_ptr++;
+        //ptr = ptr_end + 1;
+        //ptr = strstr(buf, "CSeq: ") + strlen("CSeq: ");
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: Cseq: not found");
+        //  return;
+        //}
+        //ptr_end = strchr(ptr, ' ');
+        //if (!ptr) {
+        //  ESP_LOGE(TAG, "Error: Cseq: to ' ' not found");
+        //  return;
+        //}
+        //*ptr_end = '\0';
+        //ESP_LOGI(TAG, "%s", ptr);
+        //char * cseq = strncpy(str_ptr, ptr, ptr_end - ptr);
+        //str_ptr += ptr_end - ptr;
+        //*str_ptr = '\0';
+
+        ESP_LOGI(TAG, "toline: %s\n", toline);
+        send_len = snprintf(buf, BUF_LEN, ok_str,
+            vialine,
+            fromline,
+            toline,
+            call_id,
+            cseq);
+
+        if (send_len >= BUF_LEN) {
+          ESP_LOGW(TAG, "Warning: message was truncated to %d-byte length\n", BUF_LEN);
+          buf[BUF_LEN - 1] = '\0';
+        }
+        else {
+          buf[send_len] = '\0';
+        }
+        ESP_LOGI(TAG, "Sending Response:\n%s", buf);
+        err = sendto(sock, buf, send_len, 0, (struct sockaddr *)&sip_sockaddr, socklength);
+        if (err < 0) {
+          ESP_LOGE(TAG, "sendto error");
+          return;
+        }
+
+      }
     }
 
   }

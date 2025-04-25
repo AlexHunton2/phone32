@@ -109,7 +109,6 @@ void taskReceive(void * null) {
 
     xSemaphoreGive(xConsume);
     ESP_LOGI(TAG, "received %d bytes", rtp_ring[i].len);
-    ESP_LOGI(TAG, "filled buffer: %s", rtp_ring[i].data);
   }
 
 }
