@@ -2,7 +2,7 @@ build/
 
 # sdkconfig (secrets)
 sdkconfig
-sdkconfig.*
+sdkconfig.old
 
 # vim swap files
 *.swp
@@ -41,3 +41,8 @@ sdkconfig.*
 *.app
 
 .cache/
+
+.DS_Store
+.clangd
+
+managed_components/
