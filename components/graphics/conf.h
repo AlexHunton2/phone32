@@ -40,4 +40,20 @@ void append_error(const char *fmt, ...);
 
 static const char *GRAPHICS_TAG = "graphics";
 
+typedef struct {
+  const char *label;
+  const char *tz_value;
+} TimeZoneOption;
+
+static const TimeZoneOption time_zones[] = {
+    {"UTC", "UTC0"},
+    {"US Eastern", "EST5EDT,M3.2.0,M11.1.0"},
+    {"US Central", "CST6CDT,M3.2.0,M11.1.0"},
+    {"US Mountain", "MST7MDT,M3.2.0,M11.1.0"},
+    {"US Pacific", "PST8PDT,M3.2.0,M11.1.0"},
+    {"London", "GMT0BST,M3.5.0/1,M10.5.0/2"},
+    {"Berlin", "CET-1CEST,M3.5.0/2,M10.5.0/3"},
+    {"Tokyo", "JST-9"},
+    {"Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"}};
+
 #endif

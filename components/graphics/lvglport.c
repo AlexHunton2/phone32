@@ -53,7 +53,6 @@ void lvport_connect_display_interface(esp_lcd_panel_handle_t *lcd_handle) {
   driver_data->lcd_handle = *lcd_handle;
   lv_display_set_driver_data(display, (void *)driver_data);
 
-  /* Use PSRAM
   uint32_t buffer_size = LCD_H_RES * LCD_V_RES * sizeof(uint16_t);
   uint16_t *buf1 =
       heap_caps_malloc(buffer_size, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
@@ -64,8 +63,8 @@ void lvport_connect_display_interface(esp_lcd_panel_handle_t *lcd_handle) {
     ESP_LOGE("FB", "Framebuffer allocation failed in PSRAM!");
     return;
   }
-  */
 
+  /*
   // Use Internal Buffers, 40 lines of H_RES
   uint32_t buffer_size = 40 * LCD_H_RES * sizeof(uint16_t);
   uint16_t *buf1 =
@@ -74,9 +73,10 @@ void lvport_connect_display_interface(esp_lcd_panel_handle_t *lcd_handle) {
       heap_caps_malloc(buffer_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
 
   if (buf1 == NULL || buf2 == NULL) {
-    ESP_LOGE("FB", "Framebuffer allocation failed in PSRAM!");
+    ESP_LOGE("FB", "Framebuffer allocation in internal memory!");
     return;
   }
+  */
   lvgl_mux = xSemaphoreCreateRecursiveMutex();
 
   lv_display_set_buffers(display, buf1, buf2, buffer_size,

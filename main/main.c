@@ -2,6 +2,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/event_groups.h"
 #include "nvs_flash.h"
@@ -181,7 +182,6 @@ void app_main(void) {
   graphics_init();
 
   // Initialize NVS
-  /*
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
       ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -212,19 +212,23 @@ void app_main(void) {
     ESP_LOGI(TAG, "MASK:" IPSTR, IP2STR(&ip.netmask));
     ESP_LOGI(TAG, "GW:" IPSTR, IP2STR(&ip.gw));
     ESP_LOGI(TAG, "~~~~~~~~~~~");
+
+    // Update internal clock to be on correct time by pooling NTP
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    sntp_init();
   }
 
-  run_voip();
-  */
-  // char final[MD5_DIGEST_LENGTH * 2 + 1];
-  // final[MD5_DIGEST_LENGTH * 2] = '\0';
-  // char * input = "Hello World!";
-  // int val = get_digest(final, (uint8_t *)input, strlen(input));
-  // if (val) {
-  //   ESP_LOGE("main", "error getting digest");
-  // }
-  // else {
-  //   ESP_LOGI("main", "%s", final);
-  // }
+  // run_voip();
+  //  char final[MD5_DIGEST_LENGTH * 2 + 1];
+  //  final[MD5_DIGEST_LENGTH * 2] = '\0';
+  //  char * input = "Hello World!";
+  //  int val = get_digest(final, (uint8_t *)input, strlen(input));
+  //  if (val) {
+  //    ESP_LOGE("main", "error getting digest");
+  //  }
+  //  else {
+  //    ESP_LOGI("main", "%s", final);
+  //  }
   //
 }

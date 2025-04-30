@@ -4,10 +4,15 @@
 #include "conf.h"
 #include "core/lv_obj.h"
 #include "core/lv_obj_event.h"
+#include "core/lv_obj_pos.h"
+#include "core/lv_obj_style.h"
 #include "esp_log.h"
+#include "font/lv_font.h"
 #include "fonts/impact_60.c"
-#include "images/chicken_jockey.c"
 #include "misc/lv_event.h"
+#include "misc/lv_style_gen.h"
+#include "settings.h"
+#include "widgets/label/lv_label.h"
 #include <stdint.h>
 
 screen_entry_t main_screens[MAIN_SCREEN_COUNT] = {0};
@@ -70,27 +75,53 @@ void initialize_lock_slider(lv_obj_t *parent) {
   lv_obj_add_event_cb(slider, lock_slider_event_cb, LV_EVENT_ALL, NULL);
 }
 
+static lv_obj_t *lock_time_label;
+
+static void update_lock_time_cb(lv_timer_t *timer) {
+  (void)timer; // unused
+
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+
+  char buf[64];
+  strftime(buf, sizeof(buf), "%H:%M:%S", t); // Format: HH:MM:SS
+
+  lv_label_set_text(lock_time_label, buf);
+}
+
 GFX_CALL init_lock_screen(void) {
   lv_obj_t *lock_screen = lv_obj_create(NULL);
   main_screens[SCREEN_LOCK].root = lock_screen;
 
-  lv_obj_t *title_lbl = lv_label_create(lock_screen);
-  lv_obj_add_style(title_lbl, &style_impact_60, 0);
-  lv_label_set_text(title_lbl, "PHONE32");
-  lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 40);
+  lv_obj_t *cont = lv_obj_create(lock_screen);
+  lv_obj_remove_style_all(cont);
+  lv_obj_set_size(cont, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(cont);
 
-  lv_obj_t *front_img = lv_img_create(lock_screen);
+  lv_obj_set_layout(cont, LV_LAYOUT_FLEX);
+  lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
 
-  static lv_img_dsc_t chicken_jockey_dsc = {
-      .header.w = 480,
-      .header.h = 480,
-      .data_size = 480 * 480 * LV_COLOR_DEPTH / 8,
-      .header.cf = LV_COLOR_FORMAT_RGB565, /*Set the color format*/
-      .data = chicken_jockey_map,
-  };
+  lv_obj_set_flex_align(cont,
+                        LV_FLEX_ALIGN_CENTER, // Main axis: vertical (column)
+                        LV_FLEX_ALIGN_CENTER, // Cross axis: horizontal
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(cont, 10, 0); // space between labels
+  lv_obj_set_style_pad_all(cont, 20, 0);
 
-  lv_img_set_src(front_img, &chicken_jockey_dsc);
-  lv_obj_center(front_img);
+  lv_obj_t *lock_title_label = lv_label_create(cont);
+  lv_obj_add_style(lock_title_label, &style_impact_60, 0);
+  lv_label_set_text(lock_title_label, "PHONE32");
+  lv_obj_center(lock_title_label);
+
+  static lv_style_t time_style;
+  lv_style_init(&time_style);
+  lv_style_set_text_font(&time_style, &lv_font_montserrat_48);
+
+  lock_time_label = lv_label_create(cont);
+  lv_label_set_text(lock_time_label, "");
+  lv_obj_add_style(lock_time_label, &time_style, 0);
+  lv_timer_create(update_lock_time_cb, 1000, NULL);
+  lv_obj_center(lock_time_label);
 
   initialize_lock_slider(lock_screen);
 
@@ -134,10 +165,6 @@ static lv_obj_t *home_time_label;
 
 static void update_home_time_cb(lv_timer_t *timer) {
   (void)timer; // unused
-
-  // TODO: Work on setting up timezoning with settings
-  setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
-  tzset();
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
@@ -306,21 +333,123 @@ GFX_CALL init_home_screen(void) {
   return GFX_OK;
 }
 
+int get_timezone_index_from_label(const char *selected,
+                                  const char *options_str) {
+  int index = 0;
+  char options_copy[256];
+  strncpy(options_copy, options_str, sizeof(options_copy) - 1);
+  options_copy[sizeof(options_copy) - 1] = '\0';
+
+  char *token = strtok(options_copy, "\n");
+  while (token != NULL) {
+    if (strcmp(token, selected) == 0) {
+      return index;
+    }
+    index++;
+    token = strtok(NULL, "\n");
+  }
+  return -1; // Not found
+}
+
+void timezone_changed(const char *key) {
+  lv_obj_t *dropdown =
+      settings_get_widget(key); // Assume you stored the dropdown object
+  uint16_t index = lv_dropdown_get_selected(dropdown);
+
+  if (index < sizeof(time_zones) / sizeof(time_zones[0])) {
+    setenv("TZ", time_zones[index].tz_value, 1);
+    tzset();
+  }
+}
+
 GFX_CALL init_settings_screen(void) {
   lv_obj_t *settings_screen = lv_obj_create(NULL);
   main_screens[SCREEN_SETTINGS].root = settings_screen;
 
-  lv_obj_t *label = lv_label_create(settings_screen);
-  lv_label_set_text(label, "Settings");
-  lv_obj_center(label);
+  static lv_coord_t row_dsc[] = {NAVBAR_H, SCREEN_H - NAVBAR_H,
+                                 LV_GRID_TEMPLATE_LAST};
+  static lv_coord_t col_dsc[] = {LV_PCT(100), LV_GRID_TEMPLATE_LAST};
+  lv_obj_t *grid = lv_obj_create(settings_screen);
+  lv_obj_remove_style_all(grid);
+  lv_obj_set_size(grid, SCREEN_W, SCREEN_H);
+  lv_obj_center(grid);
 
-  lv_obj_t *go_btn = lv_btn_create(settings_screen);
-  lv_obj_align(go_btn, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_obj_set_size(go_btn, 120, 50);
-  lv_obj_add_event_cb(go_btn, go_home_cb, LV_EVENT_CLICKED, NULL);
-  lv_obj_t *go_btn_lbl = lv_label_create(go_btn);
-  lv_label_set_text(go_btn_lbl, "Return");
-  lv_obj_center(go_btn_lbl);
+  lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
+  lv_obj_set_layout(grid, LV_LAYOUT_GRID);
+
+  // Navbar
+  lv_obj_t *nav_bar = lv_obj_create(grid);
+  lv_obj_remove_style_all(nav_bar);
+  lv_obj_set_grid_cell(nav_bar, LV_GRID_ALIGN_STRETCH, 0, 1,
+                       LV_GRID_ALIGN_START, 0, 1);
+  lv_obj_set_height(nav_bar, NAVBAR_H); // Set nav bar height
+  lv_obj_set_style_bg_color(nav_bar, lv_color_hex(0x222222), 0); // Dark bar
+
+  lv_obj_set_layout(nav_bar, LV_LAYOUT_FLEX);
+  lv_obj_set_flex_flow(nav_bar, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(nav_bar, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_border_side(nav_bar, LV_BORDER_SIDE_BOTTOM, 0);
+  lv_obj_set_style_border_width(nav_bar, 3, 0);
+
+  // -- Navbar -> Content
+  static lv_style_t nav_text_style;
+  lv_style_init(&nav_text_style);
+  lv_style_set_text_font(&nav_text_style, &lv_font_montserrat_20);
+
+  static lv_style_t nav_icon_style;
+  lv_style_init(&nav_icon_style);
+  lv_style_set_text_font(&nav_icon_style, &lv_font_montserrat_30);
+
+  lv_obj_t *content[3]; // 0 left, 1 center, 2 right content
+  uint16_t i;
+  for (i = 0; i < 3; i++) {
+    content[i] = lv_obj_create(nav_bar);
+    lv_obj_remove_style_all(content[i]);
+    lv_obj_set_layout(content[i], LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(content[i], LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(content[i], LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(content[i], 8, 0);
+    lv_obj_set_style_pad_all(content[i], 8, 0);
+  }
+
+  // -- Navbar -- Content -> Left Content
+  lv_obj_t *back_btn = lv_button_create(content[0]);
+  lv_obj_remove_style_all(back_btn); // Remove all default styles
+  lv_obj_set_size(back_btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_style_pad_all(back_btn, 8, 0);
+  lv_obj_set_style_bg_opa(back_btn, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0xDDDDDD), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_STATE_PRESSED);
+  lv_obj_add_event_cb(back_btn, go_home_cb, LV_EVENT_CLICKED, NULL);
+
+  lv_obj_t *back_btn_lbl = lv_label_create(back_btn);
+  lv_obj_add_style(back_btn_lbl, &nav_icon_style, 0);
+  lv_label_set_text(back_btn_lbl, LV_SYMBOL_NEW_LINE);
+  lv_obj_center(back_btn_lbl);
+
+  lv_obj_t *settings_area = lv_obj_create(grid);
+  lv_obj_set_grid_cell(settings_area, LV_GRID_ALIGN_STRETCH, 0, 1,
+                       LV_GRID_ALIGN_STRETCH, 1, 1);
+
+  // -- Navbar -- Content -> Center Content
+  lv_obj_t *settings_label = lv_label_create(content[1]);
+  lv_obj_add_style(settings_label, &nav_text_style, 0);
+  lv_label_set_text(settings_label, "Settings");
+
+  char tz_dropdown_buf[256] = "";
+  for (size_t i = 0; i < sizeof(time_zones) / sizeof(time_zones[0]); ++i) {
+    strcat(tz_dropdown_buf, time_zones[i].label);
+    if (i != sizeof(time_zones) / sizeof(time_zones[0]) - 1)
+      strcat(tz_dropdown_buf, "\n");
+  }
+
+  settings_add_dropdown("timezone", "Select Time Zone:", "US Eastern",
+                        tz_dropdown_buf, timezone_changed);
+
+  settings_init_ui(settings_area);
+  timezone_changed("timezone");
 
   return GFX_OK;
 }

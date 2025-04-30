@@ -22,7 +22,7 @@
 
 // these values are found in datasheet for ST7262
 // https://files.waveshare.com/wiki/common/ST7262.pdf
-#define LCD_PIXEL_CLOCK_HZ (12 * 1000 * 1000)
+#define LCD_PIXEL_CLOCK_HZ (13 * 1000 * 1000)
 #define HSYNC_PULSE_WIDTH (4)
 #define HSYNC_BACK_PORCH (8)
 #define HSYNC_FRONT_PORCH (8)
