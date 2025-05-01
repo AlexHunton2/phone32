@@ -609,6 +609,13 @@ int register_sip() {
   return 0;
 }
 
+void call_task(void * task_args) {
+  char * call_number = (char *)task_args;
+  make_call(call_number);
+  xTaskNotify(*(TaskHandle_t *)&call_number[12], pdTRUE, NULL);
+  vTaskDelete(NULL);
+}
+
 void make_call(char * call_number) {
   // client is already registered with the server
 
@@ -934,7 +941,7 @@ void make_call(char * call_number) {
           ESP_LOGE(TAG, "sendto error");
           return;
         }
-
+        return;
       }
     }
 
