@@ -575,10 +575,10 @@ int register_sip() {
     return 1;
   }
 
-  struct timeval timeout;
-  timeout.tv_sec = 10;
-  timeout.tv_usec = 0;
-  setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  //struct timeval timeout;
+  //timeout.tv_sec = 10;
+  //timeout.tv_usec = 0;
+  //setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
   struct sockaddr_in src_addr;
   memset(&src_addr, 0, sizeof(src_addr));
