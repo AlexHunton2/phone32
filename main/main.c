@@ -243,5 +243,9 @@ void app_main(void) {
   //    ESP_LOGI("main", "%s", final);
   //  }
   //
-  xTaskCreate(run_voip, "RunVoip", 8000, NULL, 1, NULL);
+  if (register_sip()) {
+    ESP_LOGE(TAG, "Sip register failed");
+    return;
+  }
+  //xTaskCreate(run_voip, "RunVoip", 8000, NULL, 1, NULL);
 }

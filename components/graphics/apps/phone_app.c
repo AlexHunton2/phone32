@@ -6,6 +6,7 @@
 #include "font/lv_symbol_def.h"
 #include "misc/lv_palette.h"
 #include "widgets/textarea/lv_textarea.h"
+#include "voip.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -106,6 +107,8 @@ static void btn_number_event_cb(lv_event_t *e) {
 static void call_btn_event_cb(lv_event_t *e) {
   printf("Dialing raw number: %s\n", raw_number);
   ui_show_calling_screen(lv_textarea_get_text(ta_phone), lv_scr_act());
+  //xTaskCreate(make_call, "MakeCall", 8000, NULL, 1, NULL);
+  make_call(raw_number);
 }
 
 #define BACK LV_SYMBOL_BACKSPACE // here for linter problems

@@ -26,10 +26,10 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.4.0
+    version: 5.5.0
 direct_dependencies:
 - espressif/esp_lcd_touch_gt911
 - idf
-manifest_hash: c883ed216fc2e167428118dcc2225cc3ea17a38583cdf162759a6fd80d3772e6
+manifest_hash: d869010106f0b85387a590908e13c0ab63515cf36674feb880e03474de003b7a
 target: esp32s3
 version: 2.0.0
