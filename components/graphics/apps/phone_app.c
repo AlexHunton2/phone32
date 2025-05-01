@@ -21,8 +21,18 @@ static void hangup_btn_event_cb(lv_event_t *e) {
     lv_scr_load_anim(scr_return, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, true);
 }
 
+void lvgl_timer_cb(lv_timer_t *timer) {
+  uint32_t hangup_val;
+  BaseType_t notified = xTaskNotifyWait(0, 0, &hangup_val, 0);
+  if (hangup_val == pdTRUE) {
+    hangup_btn_event_cb(NULL);
+  }
+}
+
 void ui_show_calling_screen(const char *formatted_number,
                             lv_obj_t *return_screen) {
+
+  lv_timer_create(lvgl_timer_cb, 50, NULL);
   scr_return = return_screen; // store the screen to return to
 
   lv_obj_t *scr_calling = lv_obj_create(NULL);
@@ -104,11 +114,15 @@ static void btn_number_event_cb(lv_event_t *e) {
   update_formatted_number_display();
 }
 
+static uint8_t call_arg_buf[50];
 static void call_btn_event_cb(lv_event_t *e) {
   printf("Dialing raw number: %s\n", raw_number);
   ui_show_calling_screen(lv_textarea_get_text(ta_phone), lv_scr_act());
-  //xTaskCreate(make_call, "MakeCall", 8000, NULL, 1, NULL);
-  make_call(raw_number);
+  memcpy(call_arg_buf, raw_number, 11);
+  TaskHandle_t call_ui_handle = xTaskGetCurrentTaskHandle();
+  memcpy(&call_arg_buf[12], &call_ui_handle, sizeof(call_ui_handle));
+  xTaskCreate(make_call, "MakeCall", 4096, call_arg_buf, 1, NULL);
+  //make_call(raw_number);
 }
 
 #define BACK LV_SYMBOL_BACKSPACE // here for linter problems
