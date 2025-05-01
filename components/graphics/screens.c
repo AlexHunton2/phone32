@@ -118,7 +118,7 @@ GFX_CALL init_lock_screen(void) {
   lv_style_set_text_font(&time_style, &lv_font_montserrat_48);
 
   lock_time_label = lv_label_create(cont);
-  lv_label_set_text(lock_time_label, "");
+  lv_label_set_text(lock_time_label, "00:00:00");
   lv_obj_add_style(lock_time_label, &time_style, 0);
   lv_timer_create(update_lock_time_cb, 1000, NULL);
   lv_obj_center(lock_time_label);

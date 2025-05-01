@@ -44,6 +44,7 @@ GFX_CALL graphics_init(void) {
     app_manager_register_app(&suspend_app, NULL);
     app_manager_register_app(&background_app, NULL);
     app_manager_register_app(&phone_app, NULL);
+    app_manager_register_app(&_2048_app, NULL);
 
     if (init_screens()) {
       emit_gfx_err();

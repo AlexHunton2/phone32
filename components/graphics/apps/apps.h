@@ -9,5 +9,6 @@ extern app_t background_app;
 extern app_t phone_app;
 extern app_t test_app;
 extern app_t suspend_app;
+extern app_t _2048_app;
 
 #endif
