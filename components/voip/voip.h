@@ -2,5 +2,6 @@
 
 #ifndef VOIP_H
 #define VOIP_H
-void run_voip(void);
+int register_sip();
+void make_call(char *);
 #endif
