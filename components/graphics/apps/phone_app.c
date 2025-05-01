@@ -4,9 +4,10 @@
 #include "core/lv_obj_style_gen.h"
 #include "esp_log.h"
 #include "font/lv_symbol_def.h"
+#include "freertos/FreeRTOS.h"
 #include "misc/lv_palette.h"
-#include "widgets/textarea/lv_textarea.h"
 #include "voip.h"
+#include "widgets/textarea/lv_textarea.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -121,8 +122,8 @@ static void call_btn_event_cb(lv_event_t *e) {
   memcpy(call_arg_buf, raw_number, 11);
   TaskHandle_t call_ui_handle = xTaskGetCurrentTaskHandle();
   memcpy(&call_arg_buf[12], &call_ui_handle, sizeof(call_ui_handle));
-  xTaskCreate(make_call, "MakeCall", 4096, call_arg_buf, 1, NULL);
-  //make_call(raw_number);
+  xTaskCreate(call_task, "MakeCall", 4096, call_arg_buf, 1, NULL);
+  // make_call(raw_number);
 }
 
 #define BACK LV_SYMBOL_BACKSPACE // here for linter problems
