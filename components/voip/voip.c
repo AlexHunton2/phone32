@@ -612,7 +612,7 @@ int register_sip() {
 void call_task(void * task_args) {
   char * call_number = (char *)task_args;
   make_call(call_number);
-  xTaskNotify(*(TaskHandle_t *)&call_number[12], pdTRUE, NULL);
+  xTaskNotify(*(TaskHandle_t *)&call_number[12], pdTRUE, eSetValueWithOverwrite);
   vTaskDelete(NULL);
 }
 
