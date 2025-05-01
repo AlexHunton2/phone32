@@ -177,6 +177,18 @@ static esp_err_t wifi_init_sta(void) {
   }
 }
 
+static void run_voip(void *) {
+  char *call_number = "2245711812";
+  if (register_sip()) {
+    ESP_LOGE(TAG, "Sip register failed");
+    return;
+  }
+  ESP_LOGI(TAG, "Sip Registered");
+
+  make_call(call_number);
+  vTaskDelete(NULL);
+}
+
 void app_main(void) {
   // ===  Graphics  ===
   graphics_init();
@@ -231,4 +243,5 @@ void app_main(void) {
   //    ESP_LOGI("main", "%s", final);
   //  }
   //
+  xTaskCreate(run_voip, "RunVoip", 8000, NULL, 1, NULL);
 }
